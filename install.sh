@@ -3,12 +3,14 @@
 #
 #   ./install.sh                     find the game in your Steam libraries
 #   ./install.sh --game-dir DIR      use this game folder instead
+#   ./install.sh --no-login          install without signing in now
 #
 # What it does (nothing else):
 #   1. Copies xauth.py to ~/.local/share/dungeons2-compat (the DLL looks there).
 #   2. Creates a Python venv there with the "cryptography" package.
 #   3. Copies src/xgameruntime.dll next to Dungeons.exe, next to
 #      Dungeons-Win64-Shipping.exe and into the game's Proton prefix.
+#   4. Signs in when run from an interactive terminal, unless --no-login is set.
 set -eu
 
 APPID=1912410
@@ -18,6 +20,7 @@ DLL="$ROOT/src/xgameruntime.dll"
 # Fixed by the DLL: it runs xauth.py from $HOME/.local/share/dungeons2-compat.
 DEST="$HOME/.local/share/dungeons2-compat"
 GAME_DIR=${GAME_DIR:-}
+LOGIN=1
 
 die() { echo "Error: $*" >&2; exit 1; }
 
@@ -25,7 +28,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --game-dir) [ $# -ge 2 ] || die "--game-dir needs a path"; GAME_DIR=$2; shift 2 ;;
         --game-dir=*) GAME_DIR=${1#--game-dir=}; shift ;;
-        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --no-login) LOGIN=0; shift ;;
+        -h|--help) sed -n '2,/^set -eu/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         *) die "unknown option $1 (see --help)" ;;
     esac
 done
@@ -119,11 +123,21 @@ else
     echo "      Launch the game once, then run ./install.sh again."
 fi
 
+if [ "$LOGIN" -eq 1 ] && [ -t 0 ]; then
+    echo "Signing in to your Microsoft account..."
+    if ! "$VENV/bin/python3" "$DEST/xauth.py"; then
+        echo "Sign-in did not complete. Run the command below to try again." >&2
+    fi
+fi
+
+printf '\nTo sign in or refresh your login manually:\n  "%s" "%s"\n' "$VENV/bin/python3" "$DEST/xauth.py"
+
 cat <<'EOF'
 
 Done. In Steam: Minecraft Dungeons II > Properties > General > Launch options:
 
   WINEDLLOVERRIDES="xgameruntime=n" %command%
 
-On first launch a window shows a code: enter it at https://www.microsoft.com/link
+If you have not signed in yet, the game will show a code on first launch.
+Enter it at https://www.microsoft.com/link
 EOF

@@ -45,12 +45,28 @@ CachyOS…) and Python 3 with `venv`.
    ```
    WINEDLLOVERRIDES="xgameruntime=n" %command%
    ```
-4. Launch the game. The first time, a window shows a **code** and
+4. Launch the game. If you have not signed in yet, a window shows a **code** and
    <https://www.microsoft.com/link> opens. Enter the code and sign in with
    **your** Microsoft/Xbox account. Do not change the URL.
 
 After that the game starts normally. The session refreshes on its own and, if
 it expires, asks you for a code again.
+
+In an interactive terminal, the installer starts sign-in after copying the files.
+Use `./install.sh --no-login` to skip it. The code is printed in the terminal;
+open the displayed URL yourself if a browser does not open.
+
+To manage your login manually, quit the game and run:
+
+```sh
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --status
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --force
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --logout
+```
+
+`--status` shows whether the cache is valid. `--force` signs in again, allowing
+an account change. `--logout` removes the cache; the next launch signs in again.
+Running without options reuses or refreshes the cached login.
 
 ### If Steam updates the game
 
@@ -103,6 +119,7 @@ It does not use `sudo` and only does this:
    - `…/Minecraft Dungeons II/` (next to `Dungeons.exe`)
    - `…/Minecraft Dungeons II/Dungeons/Binaries/Win64/` (next to `Dungeons-Win64-Shipping.exe`)
    - `…/compatdata/1912410/pfx/drive_c/windows/system32/` (the game's Proton prefix)
+5. Starts sign-in in an interactive terminal, unless `--no-login` is passed.
 
 If the game is running, the installer refuses to continue.
 

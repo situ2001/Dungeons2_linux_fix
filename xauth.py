@@ -3,13 +3,21 @@
 
 The browser login uses this game's Microsoft app id. Tokens are written
 for the local runtime; they are never printed.
+
+Run without options to sign in or refresh; use --status, --force, or --logout
+to manage the cached login. Desktop integration is adapted from Alextibtab's
+dynamic-token-path changes (319d723 and c4ff076).
 """
+import argparse
 import base64
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import struct
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +31,7 @@ PLAYFAB_RP = "http://playfab.xboxlive.com/"
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOKEN_PATH = os.path.join(HERE, "tokens.txt")
 CODE_PATH = os.path.join(HERE, "login-code.txt")
+ERROR_PATH = os.path.join(HERE, "login-error.txt")
 
 
 def post(url, form=None, payload=None):
@@ -44,6 +53,8 @@ def post(url, form=None, payload=None):
             parsed = {"error": body[:300]}
         parsed["_status"] = exc.code
         return parsed
+    except (urllib.error.URLError, OSError) as exc:
+        raise SystemExit("Network error: %s" % (getattr(exc, "reason", None) or exc)) from exc
 
 
 def jwt_exp(token):
@@ -88,15 +99,25 @@ def repair_stored_exp():
     write_tokens([(line.split("=", 1)[0], line.split("=", 1)[1] if "=" in line else "") for line in lines])
 
 
-def cached_ok():
+def read_tokens():
+    values = {}
     if not os.path.isfile(TOKEN_PATH):
-        return False
-    exp = 0
+        return values
     with open(TOKEN_PATH, "r", encoding="utf-8") as handle:
         for line in handle:
-            if line.startswith("exp="):
-                exp = int(line[4:].strip() or "0")
-    return exp > time.time() + 120
+            line = line.rstrip("\n")
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value
+    return values
+
+
+def token_expiry():
+    return int(read_tokens().get("exp") or "0")
+
+
+def cached_ok():
+    return token_expiry() > time.time() + 120
 
 
 def rps_ticket(access):
@@ -222,23 +243,92 @@ def write_tokens(fields):
 
 
 def desktop_env():
+    """Environment for desktop helpers, without assuming a specific session."""
     env = os.environ.copy()
-    env.setdefault("DISPLAY", ":0")
-    env.setdefault("XDG_RUNTIME_DIR", "/run/user/%s" % os.getuid())
+    if not env.get("XDG_RUNTIME_DIR") and hasattr(os, "getuid"):
+        candidate = "/run/user/%d" % os.getuid()
+        if os.path.isdir(candidate):
+            env["XDG_RUNTIME_DIR"] = candidate
     return env
+
+
+def _browser_commands(url):
+    """Yield candidate browser commands, most preferred first."""
+    chosen = os.environ.get("BROWSER")
+    if chosen:
+        for entry in chosen.split(os.pathsep):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if "%s" in entry:
+                parts = shlex.split(entry.replace("%s", url))
+            else:
+                parts = shlex.split(entry) + [url]
+            if parts:
+                yield parts
+    for parts in (
+        ["xdg-open", url],
+        ["gio", "open", url],
+        ["sensible-browser", url],
+        ["x-www-browser", url],
+        ["firefox", url],
+        ["chromium", url],
+        ["chromium-browser", url],
+        ["google-chrome", url],
+        ["brave-browser", url],
+        ["microsoft-edge", url],
+        ["epiphany", url],
+        ["konqueror", url],
+        ["open", url],
+    ):
+        yield parts
+
+
+def open_browser(url, env):
+    """Try each launcher until one starts. Returns True when one is used."""
+    for cmd in _browser_commands(url):
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            continue
+        if proc.poll() is None or proc.returncode == 0:
+            return True
+    return False
+
+
+def notify(text, env):
+    """Show a desktop notification with whichever helper is installed."""
+    for cmd in (
+        ["zenity", "--info", "--title=Minecraft Dungeons II sign-in", "--text", text, "--width=560"],
+        ["yad", "--info", "--title=Minecraft Dungeons II sign-in", "--text", text, "--width=560"],
+        ["kdialog", "--title", "Minecraft Dungeons II sign-in", "--msgbox", text],
+        ["xmessage", "-center", text],
+    ):
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def show_code(url, code):
     with open(CODE_PATH, "w", encoding="utf-8") as handle:
         handle.write(url + "\n" + code + "\n")
-    env = desktop_env()
-    subprocess.Popen(["xdg-open", url], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     text = "Sign in with your Microsoft account.\n\nOpen %s\nCode: %s" % (url, code)
-    if os.path.exists("/usr/bin/zenity"):
-        subprocess.Popen(
-            ["zenity", "--info", "--title=Minecraft Dungeons II sign-in", "--text", text, "--width=420"],
-            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+    print("\nSign in with your Microsoft account")
+    print("  1. Open: %s" % url)
+    print("  2. Enter code: %s\n" % code)
+    sys.stdout.flush()
+    env = desktop_env()
+    if not open_browser(url, env):
+        print("No browser launcher was found; open the URL above yourself.")
+        sys.stdout.flush()
+    notify(text, env)
 
 
 def poll_msa(device_code, interval, expires_in):
@@ -275,13 +365,7 @@ def refresh_msa(refresh):
 
 
 def load_refresh():
-    if not os.path.isfile(TOKEN_PATH):
-        return None
-    with open(TOKEN_PATH, "r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("refresh="):
-                return line[len("refresh="):].rstrip("\n")
-    return None
+    return read_tokens().get("refresh") or None
 
 
 def finish(msa):
@@ -321,16 +405,54 @@ def finish(msa):
     ])
 
 
-def main():
-    repair_stored_exp()
+def remove_tokens():
+    for path in (TOKEN_PATH, TOKEN_PATH + ".tmp", CODE_PATH, ERROR_PATH):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    print("Removed the cached login.")
+
+
+def show_status():
     if cached_ok():
+        exp = token_expiry()
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(exp))
+        print("Signed in; tokens valid until %s." % when)
+    elif os.path.isfile(TOKEN_PATH):
+        print("Cached tokens are present but expired. Run xauth.py to refresh or sign in again.")
+    else:
+        print("Not signed in. Run xauth.py to sign in.")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Sign in with your Microsoft account and cache Xbox tokens for Minecraft Dungeons II.")
+    parser.add_argument("--force", "-f", action="store_true", help="sign in again even if the cached tokens are still valid")
+    parser.add_argument("--logout", action="store_true", help="delete the cached login and exit")
+    parser.add_argument("--status", action="store_true", help="show the cached login and exit")
+    args = parser.parse_args(argv)
+    if args.logout:
+        remove_tokens()
         return
-    refresh = load_refresh()
-    if refresh:
-        refreshed = refresh_msa(refresh)
-        if refreshed:
-            finish(refreshed)
-            return
+    if args.status:
+        show_status()
+        return
+    if not args.force:
+        repair_stored_exp()
+    if not args.force and cached_ok():
+        exp = token_expiry()
+        print("Already signed in; tokens valid until %s."
+              % time.strftime("%Y-%m-%d %H:%M", time.localtime(exp)))
+        print("Use --force to sign in again.")
+        return
+    if not args.force:
+        refresh = load_refresh()
+        if refresh:
+            refreshed = refresh_msa(refresh)
+            if refreshed:
+                finish(refreshed)
+                print("Refreshed the cached login.")
+                return
     started = post("https://login.live.com/oauth20_connect.srf", form={
         "client_id": CLIENT,
         "scope": SCOPE,
@@ -340,13 +462,16 @@ def main():
         raise SystemExit("Could not start Microsoft login: %s" % started.get("error"))
     show_code(started.get("verification_uri") or "https://www.microsoft.com/link", started["user_code"])
     finish(poll_msa(started["device_code"], started.get("interval", 5), started.get("expires_in", 900)))
+    print("Signed in. You can launch the game now.")
 
 
 if __name__ == "__main__":
     try:
         main()
     except SystemExit as exc:
-        if exc.code not in (0, None):
-            with open(os.path.join(HERE, "login-error.txt"), "w", encoding="utf-8") as handle:
+        if exc.code not in (0, None) and not isinstance(exc.code, int):
+            with open(ERROR_PATH, "w", encoding="utf-8") as handle:
                 handle.write(str(exc.code or exc)[:400])
         raise
+    except KeyboardInterrupt:
+        raise SystemExit("Cancelled.")

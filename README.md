@@ -46,7 +46,25 @@ Quit the game completely before installing. A running process keeps the old DLL.
 
 ## First sign-in
 
-Start the game from Steam. A window shows a code and opens <https://www.microsoft.com/link>. Enter the code, then sign in with the Microsoft account that should own the Xbox profile. Leave that page as `https://www.microsoft.com/link` with no extra query string.
+When run in a terminal, `./install.sh` starts sign-in after installation. Use
+`./install.sh --no-login` to skip this step. The helper prints the code and opens
+<https://www.microsoft.com/link>, with a desktop dialog when a supported tool is
+available. Enter the code and sign in with the Microsoft account that should own
+the Xbox profile. Leave that page as `https://www.microsoft.com/link` with no extra
+query string. If you skip sign-in, start the game from Steam to sign in there.
+
+You can also manage the installed helper directly:
+
+```sh
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py          # sign in or refresh
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --status # show login status
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --force  # sign in again / switch account
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --logout # delete the cached login
+```
+
+Quit the game before switching accounts or logging out. The next game launch
+signs in again after logout. The helper respects `BROWSER`; if no browser launcher
+is available, open the printed URL yourself.
 
 The token file is `~/.local/share/dungeons2-compat/tokens.txt` (mode `0600`). Do not share it. When it expires, the next launch refreshes it or asks you to sign in again.
 

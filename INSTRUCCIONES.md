@@ -45,12 +45,29 @@ GE, CachyOS…) y Python 3 con `venv`.
    ```
    WINEDLLOVERRIDES="xgameruntime=n" %command%
    ```
-4. Abre el juego. La primera vez aparece una ventana con un **código** y se abre
+4. Abre el juego. Si aún no iniciaste sesión, aparece una ventana con un **código** y se abre
    <https://www.microsoft.com/link>. Escribe el código e inicia sesión con **tu**
    cuenta de Microsoft/Xbox. No cambies la URL.
 
 Después de esto, el juego arranca normal. La sesión se renueva sola y, si
 caduca, vuelve a pedirte el código.
+
+En una terminal interactiva, el instalador inicia sesión después de copiar los
+archivos. Usa `./install.sh --no-login` para omitir este paso. El código aparece
+en la terminal; abre la URL indicada si el navegador no se abre.
+
+Para gestionar la sesión manualmente, cierra el juego y ejecuta:
+
+```sh
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --status
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --force
+~/.local/share/dungeons2-compat/.venv/bin/python3 ~/.local/share/dungeons2-compat/xauth.py --logout
+```
+
+`--status` muestra si la sesión guardada sigue vigente. `--force` inicia sesión
+de nuevo y permite cambiar de cuenta. `--logout` elimina la sesión guardada;
+el siguiente arranque vuelve a iniciar sesión. Sin opciones, el script reutiliza
+o renueva la sesión guardada.
 
 ### Si Steam actualiza el juego
 
@@ -104,6 +121,7 @@ No usa `sudo` y solo hace esto:
    - `…/Minecraft Dungeons II/` (junto a `Dungeons.exe`)
    - `…/Minecraft Dungeons II/Dungeons/Binaries/Win64/` (junto a `Dungeons-Win64-Shipping.exe`)
    - `…/compatdata/1912410/pfx/drive_c/windows/system32/` (la carpeta de Proton del juego)
+5. Inicia sesión en una terminal interactiva, salvo con `--no-login`.
 
 Si el juego está abierto, el instalador se niega a continuar.
 
